@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <assert.h>
 #include <errno.h>
 #include <pthread.h>
@@ -9,6 +10,7 @@
 #include <time.h>
 #include <unistd.h>     // getopt guide: https://azrael.digipen.edu/~mmead/www/mg/getopt/index.html
 #include <ctype.h>      // for isdigit()
+#include <sched.h>
 
 #define PAGE_SIZE   4096
 #define PAGES       1
@@ -17,6 +19,8 @@
 struct per_thread_info {
     long tid;
     pthread_t thread;
+    pthread_attr_t thread_attr;
+    cpu_set_t cpuset;
     unsigned long counter;
     int return_value;
 };
@@ -31,8 +35,6 @@ void* test_smokewagon(void* info_ptr) {
     unsigned long local_counter = 0;
     char* my_mmap_ptr;
     struct timespec now;
-
-    // set cpu affinity: https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
 
     do {
         // time check
@@ -104,6 +106,11 @@ int main(int argc, char *argv[]) {
                 break;
         }
     }
+
+    // set main thread's cpu affinity: https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
+    CPU_ZERO(&thread_infos[0].cpuset);
+    CPU_SET(0, &thread_infos[0].cpuset);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &thread_infos[0].cpuset);
 
     for (long t=1;t<=threads;t++) {
         struct timespec now;
