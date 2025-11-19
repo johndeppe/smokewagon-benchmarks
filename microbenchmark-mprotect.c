@@ -104,6 +104,7 @@ int main(int argc, char *argv[]) {
     for (long i=0; i<threads; i++) {
         thread_infos[i].tid = i; // assign each thread an id
         thread_infos[i].my_page = my_mmap_ptr + i*HUGEPAGE_SIZE; // assign each thread a page
+        printf("make thread %ld's page writable\n", i);
         thread_infos[i].return_value = mprotect(thread_infos[i].my_page, PAGE_SIZE, PROT_READ|PROT_WRITE); // make thread's page writable
         thread_infos[i].my_page[0] = 'x'; // fault-in thread's page
 
