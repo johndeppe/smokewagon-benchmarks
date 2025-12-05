@@ -11,6 +11,7 @@
 #include <unistd.h>     // getopt guide: https://azrael.digipen.edu/~mmead/www/mg/getopt/index.html
 #include <ctype.h>      // for isdigit()
 #include <sched.h>
+#include <sys/utsname.h> // for uname syscall
 
 #define HUGEPAGE_SIZE 2097152
 #define PAGE_SIZE   4096
@@ -23,7 +24,7 @@ struct __attribute__ ((aligned (64))) per_thread_info {
     cpu_set_t cpuset;
     unsigned long counter;
     int return_value;
-    char* my_page;
+    unsigned long* my_page;
 };
 
 long threads = 4; 
@@ -40,8 +41,14 @@ void* test_smokewagon(void* info_ptr) {
         clock_gettime(CLOCK_MONOTONIC, &now);
 
         // mprotect: https://man7.org/linux/man-pages/man2/mprotect.2.html
+
+        // write page
+        my_info->return_value = mprotect(my_info->my_page, PAGE_SIZE, PROT_WRITE);
+        my_info->my_page[0] = local_counter;
+
+        // read page
         my_info->return_value = mprotect(my_info->my_page, PAGE_SIZE, PROT_READ);
-        my_info->return_value = mprotect(my_info->my_page, PAGE_SIZE, PROT_READ|PROT_WRITE);
+        assert(my_info->my_page[0] == local_counter); // read page
 
         local_counter++;
     } while ( end > now.tv_sec * 1000000000L + now.tv_nsec );
@@ -53,7 +60,7 @@ void* test_smokewagon(void* info_ptr) {
 
 int main(int argc, char *argv[]) {
     struct per_thread_info thread_infos[MAX_THREADS];
-    long results[MAX_THREADS][2] = {0}; // second dimension is smokewagon 0 and 1
+    long results[MAX_THREADS][2] = {0}; // second dimension is smokewagon.  0 is off and 1 is on.
 
     // check opts
     int opt;
@@ -88,9 +95,22 @@ int main(int argc, char *argv[]) {
 
     printf("\nmprotect() microbenchmark, testing from 1 to %ld threads for %ld seconds each\n", threads, duration);
 
+    // get and print uname
+    struct utsname u;
+    if (uname(&u) == -1) {
+        perror("uname\n");
+        return EXIT_FAILURE;
+    }
+    printf("running on: %s %s %s %s %s\n",
+        u.sysname,
+        u.nodename,
+        u.release,
+        u.version,
+        u.machine);
+
     // allocate: https://man7.org/linux/man-pages/man3/malloc.3.html
     // we allocate a way larger area than needed (2MB / thread) to avoid contention at the kernel's PTE lock
-    char* my_mmap_ptr = (char*)mmap(NULL, threads*HUGEPAGE_SIZE, PROT_NONE, MAP_ANON|MAP_SHARED, -1, 0);
+    unsigned long* my_mmap_ptr = (unsigned long*)mmap(NULL, threads*HUGEPAGE_SIZE, PROT_NONE, MAP_ANON|MAP_SHARED, -1, 0);
     if (my_mmap_ptr == NULL) {
         printf("mmap() failed and returned NULL\n");
         return -1;
@@ -103,10 +123,10 @@ int main(int argc, char *argv[]) {
 
     for (long i=0; i<threads; i++) {
         thread_infos[i].tid = i; // assign each thread an id
-        thread_infos[i].my_page = my_mmap_ptr + i*HUGEPAGE_SIZE; // assign each thread a page
-        printf("make thread %ld's page writable\n", i);
-        thread_infos[i].return_value = mprotect(thread_infos[i].my_page, PAGE_SIZE, PROT_READ|PROT_WRITE); // make thread's page writable
-        thread_infos[i].my_page[0] = 'x'; // fault-in thread's page
+        thread_infos[i].my_page = my_mmap_ptr + i * HUGEPAGE_SIZE / sizeof(unsigned long); // assign each thread a page
+        printf("fault-in thread %ld's page\n", i);
+        thread_infos[i].return_value = mprotect(thread_infos[i].my_page, PAGE_SIZE, PROT_WRITE); // make thread's page writable
+        thread_infos[i].my_page[0] = 0; // fault-in thread's page
 
         // // set cpu affinities: https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
         // CPU_ZERO(&thread_infos[i].cpuset);
@@ -119,10 +139,10 @@ int main(int argc, char *argv[]) {
         //     pthread_attr_init(&thread_infos[i].attr);
         //     pthread_attr_setaffinity_np(&thread_infos[i].attr, sizeof(cpu_set_t), &thread_infos[i].cpuset); // reusing these below is fine
         // }
+        // printf("cpu affinities set\n");
     }
-
-
-    printf("cpu affinities set, begin benchmarking:\n\n");
+    
+    printf("\nbegin benchmarking\n\n");
 
     // main microbenchmarking loops
     for (long t=0; t<threads; t++) {
@@ -136,7 +156,7 @@ int main(int argc, char *argv[]) {
             end = (duration + now.tv_sec) * 1000000000L + now.tv_nsec;
             assert(end > now.tv_sec * 1000000000L + now.tv_nsec); // check overflow
 
-            printf("Running %s mprotect loop test with %ld threads for %ld seconds:\n", smokewagon ? "smokewagon" : "baseline", t+1, duration);
+            printf("Running %s mprotect loop with %ld threads for %ld seconds:\n", smokewagon ? "smokewagon" : "baseline", t+1, duration);
 
             // create and run threads
             for (long i=1; i<=t; i++) {
@@ -162,20 +182,40 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    FILE *fptr = fopen("result-microbenchmark-mmap.csv", "w");
+    const char* filename_prefix = "result-microbenchmark-mprotect-";
+    const char* filename_suffix = ".csv";
+    char* filename = malloc(strlen(filename_prefix) + strlen(u.release) + strlen(filename_suffix) + 1);
+    if (!filename) {
+        perror("filename allocation failed");
+    }
+    strcpy(filename, filename_prefix);
+    strcat(filename, u.release);
+    strcat(filename, filename_suffix);
+
+    printf("opening %s\n", filename);
+    FILE *fptr = fopen(filename, "w");
     if(fptr == NULL) {
-        printf("File Error!");   
+        perror("file opening error!");
         return EXIT_FAILURE;
     }
-    
+
     fprintf(fptr, "threads, baseline, smokewagon\n");
     for (long t=0; t<threads; t++) {
         fprintf(fptr, "%ld, %ld, %ld\n", t+1, results[t][0], results[t][1]);
-        pthread_attr_destroy(&thread_infos[t].attr);
     }
     fclose(fptr);
-    printf("totals written to result-microbenchmark-mmap.csv\n");
+    printf("totals written to %s\n", filename);
+
+    free(filename);
+
+    // for (long t=1; t<threads; t++) {
+    //     pthread_attr_destroy(&thread_infos[t].attr);
+    // /* don't destroy pthread_attr 0, since we didn't initialize it */
+    // }
+    // printf("pthread attributes destroyed\n");
 
     munmap(my_mmap_ptr, threads*HUGEPAGE_SIZE);
+    printf("testing area munmapped\n");
+
     return EXIT_SUCCESS;
 }
