@@ -210,7 +210,7 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    fprintf(fptr, "threads, baseline-shootdown, baseline-none, smokewagon-shootdown, smokewagon-none\n");
+    fprintf(fptr, "threads,none-shootdown,none-none,madvise-shootdown,madvise-none\n");
     for (long t=0; t<threads; t++) {
         fprintf(fptr, "%ld, %ld, %ld, %ld, %ld\n", t+1, results[t][0][0], results[t][0][1], results[t][1][0], results[t][1][1]);
     }
