@@ -33,6 +33,7 @@ struct __attribute__ ((aligned (64))) per_thread_info {
     int fd;
 };
 
+long min_threads = 1;
 long threads = 4;
 long duration = 5;
 long end;
@@ -88,7 +89,7 @@ int main(int argc, char *argv[]) {
     // check opts
     int opt;
     char* endptr;
-    while ((opt = getopt(argc, argv, "st:d:")) != -1) {
+    while ((opt = getopt(argc, argv, "st:d:m:")) != -1) {
         switch(opt) {
             case 't':
                 for (char *p = optarg; *p; p++) {
@@ -102,6 +103,20 @@ int main(int argc, char *argv[]) {
                     threads = opt_threads;
                 } else {
                     printf("Error: -t is %d, but should be between 1 and %d, defaulting to 4\n", opt_threads, MAX_THREADS);
+                }
+                break;
+                case 'm':
+                for (char *p = optarg; *p; p++) {
+                    if (!isdigit(*p)) {
+                        printf("Error: -m requires a positive integer\n");
+                        return EXIT_FAILURE;
+                    }
+                }
+                int opt_min_threads = atoi(optarg);
+                if (opt_min_threads <= MAX_THREADS && opt_min_threads > 0) {
+                    min_threads = opt_min_threads;
+                } else {
+                    printf("Error: -m is %d, but should be between 1 and %d, defaulting to 1\n", opt_threads, MAX_THREADS);
                 }
                 break;
             case 'd':
@@ -118,8 +133,12 @@ int main(int argc, char *argv[]) {
                 break;
         }
     }
+    if (min_threads > threads) {
+        printf("min_threads (-m %ld) must be larger than threads (-t %ld)\n", min_threads, threads);
+        return EXIT_FAILURE;
+    }
 
-    printf("filebacked mmap() microbenchmark, testing from 1 to %ld threads for %ld seconds each\n\n", threads, duration);
+    printf("filebacked mmap() microbenchmark, testing from %ld to %ld threads for %ld seconds each\n\n", min_threads, threads, duration);
 
     if (smokewagon) {
         printf("smokewagon ON\n\n");
@@ -205,7 +224,7 @@ int main(int argc, char *argv[]) {
     printf("\nbegin benchmarking\n\n");
 
     // main microbenchmarking loops
-    for (long t=0; t<threads; t++) {
+    for (long t=min_threads-1; t<threads; t++) {
         mmap_flags = smokewagon ? MAP_SHARED|MAP_FIXED_NOREPLACE : MAP_SHARED|MAP_FIXED_NOREPLACE|MAP_PRIVATE_TLB;
 
         // set when benchmark ends
