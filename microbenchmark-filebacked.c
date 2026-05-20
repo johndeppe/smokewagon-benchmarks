@@ -30,6 +30,7 @@ struct __attribute__ ((aligned (64))) per_thread_info {
     unsigned long counter;
     int return_value;
     char* my_page;
+    char* extra_page;
     int fd;
 };
 
@@ -169,12 +170,7 @@ int main(int argc, char *argv[]) {
             printf("memory allocation failed!\n");
             return -1;
         }
-
-        // free first page in thread's 1GB
-        munmap(thread_infos[i].my_page, PAGE_SIZE);
-
-        // keep the second page of each area, to prevent full_mm shootdown by preventing freed_pages in mmu_gather
-        thread_infos[i].my_page[PAGE_SIZE] = 'x';
+        free(thread_infos[i].my_page);
 
         // open a file for each thread
         char filename[50];
@@ -194,7 +190,7 @@ int main(int argc, char *argv[]) {
 
         // mmap and write file for warmup
         char* ptr = mmap(thread_infos[i].my_page, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE, thread_infos[i].fd, 0);
-        if (ptr == NULL || ptr == MAP_FAILED || ptr != thread_infos[i].my_page) {
+        if (ptr == NULL) {
             printf("mmap() for tid: %d failed, ptr == NULL\n", i);
             return -1;
         } else if (ptr == MAP_FAILED) {
@@ -206,6 +202,20 @@ int main(int argc, char *argv[]) {
         }
         ptr[0] = 'y';
         munmap(ptr, PAGE_SIZE);
+
+        // allocate a second anonymous page next to the file to prevent freed_tables from provoking full-tlb shootdown
+        thread_infos[i].extra_page = mmap(thread_infos[i].my_page + 4096, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
+        if (thread_infos[i].extra_page == NULL) {
+            printf("mmap() for tid: %d failed, ptr == NULL\n", i);
+            return -1;
+        } else if (thread_infos[i].extra_page == MAP_FAILED) {
+            printf("mmap() for tid: %d failed, ptr == MAP_FAILED\n", i);
+            return -1;
+        } else if (thread_infos[i].extra_page != thread_infos[i].my_page + 4096) {
+            printf("mmap() for tid: %d problem, thread_infos[i].extra_page != thread_infos[i].my_page + 4096\n", i);
+            return -1;
+        }
+
 
         // set cpu affinities: https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
         CPU_ZERO(&thread_infos[i].cpuset);
@@ -265,8 +275,7 @@ int main(int argc, char *argv[]) {
         char filename[50];
         snprintf(filename, sizeof(filename), "microbenchmark-filebacked-temp-%02d", i);
         remove(filename);
-        // unmap adjacent anonymous memory that prevents freed_tables whole-tlb shootdown
-        munmap(thread_infos[i].my_page + PAGE_SIZE, PAGE_SIZE);
+        munmap(thread_infos[i].extra_page, PAGE_SIZE);
     }
     printf("testing files deleted\n\n");
 
