@@ -15,7 +15,9 @@
 #include <ctype.h>      // for isdigit()
 #include <sched.h>
 #include <sys/utsname.h> // for uname syscall
+#include <stdint.h> // for uintptr_t
 
+#define ONE_GB_SIZE (1ULL << 30)
 #define HUGEPAGE_SIZE 2097152
 #define PAGE_SIZE   4096
 #define MAX_THREADS 64
@@ -30,7 +32,7 @@ struct __attribute__ ((aligned (64))) per_thread_info {
     unsigned long counter;
     int return_value;
     char* my_page;
-    char* extra_page;
+    char* bystander_page;
     int fd;
 };
 
@@ -41,7 +43,7 @@ long end;
 
 int protread;
 int protwrite;
-int mmap_flags;
+int mmap_flags = MAP_SHARED|MAP_FIXED_NOREPLACE;
 bool smokewagon = false; // smokewagon == false means don't use smokewagon, smokewagon == true means use smokewagon
 
 void* test_smokewagon(void* info_ptr) {
@@ -142,6 +144,7 @@ int main(int argc, char *argv[]) {
     printf("filebacked mmap() microbenchmark, testing from %ld to %ld threads for %ld seconds each\n\n", min_threads, threads, duration);
 
     if (smokewagon) {
+        mmap_flags |= MAP_PRIVATE_TLB;
         printf("smokewagon ON\n\n");
     } else {
         printf("smokewagon OFF\n\n");
@@ -160,17 +163,37 @@ int main(int argc, char *argv[]) {
         u.version,
         u.machine);
 
+
+    // each thread gets its own 1 GB virtual region to avoid page table lock contention
+    // get this by mapping threads+1 GB and then picking aligned pointers from it
+    char* big_mmap_ptr = mmap(NULL, ONE_GB_SIZE*(threads+1), PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+    if (big_mmap_ptr == MAP_FAILED || big_mmap_ptr == NULL) {
+        printf("big mmap failed\n");
+        return -1;
+    }
+    // GB-aligned          big_mmap_ptr                              aligned_ptr
+    // |-----unallocated---|----------offset_to_allocated------------|-------big-allocation-goes-on...
+    size_t offset_to_unallocated = (uintptr_t) big_mmap_ptr % ONE_GB_SIZE;
+    size_t offset_to_allocated = (ONE_GB_SIZE - offset_to_unallocated) % ONE_GB_SIZE;
+    char* aligned_ptr = big_mmap_ptr + offset_to_allocated;
+
     // per-thread preparation
     for (int i=0; i<threads; i++) {
         thread_infos[i].tid = i; // assign each thread an id
 
-        // each thread gets its own 1 GB virtual region to avoid page table lock contention
-        // is this overkill? does 2MB do it?
-        if (posix_memalign((void**)&thread_infos[i].my_page, 512*HUGEPAGE_SIZE, 2*PAGE_SIZE)) {
-            printf("memory allocation failed!\n");
-            return -1;
-        }
-        free(thread_infos[i].my_page);
+        // carve off our chunk of the big allocation
+        thread_infos[i].my_page = aligned_ptr;
+        aligned_ptr += ONE_GB_SIZE;
+
+        // punch a hole in our allocation that we'll map the file into later
+        munmap(thread_infos[i].my_page, PAGE_SIZE);
+
+        // each thread gets a bystander page to prevent freed_pages full-mm shootdown
+        thread_infos[i].bystander_page = thread_infos[i].my_page + PAGE_SIZE;
+        mprotect(thread_infos[i].bystander_page, PAGE_SIZE, PROT_READ|PROT_WRITE);
+        thread_infos[i].bystander_page[0] = 'x';
+
+        // could unmap the rest of our allocation, but why bother? faster vma traversal maybe?
 
         // open a file for each thread
         char filename[50];
@@ -188,7 +211,7 @@ int main(int argc, char *argv[]) {
             return -1;
         }
 
-        // mmap and write file for warmup
+        // mmap file and write for warmup
         char* ptr = mmap(thread_infos[i].my_page, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_FIXED_NOREPLACE, thread_infos[i].fd, 0);
         if (ptr == NULL) {
             printf("mmap() for tid: %d failed, ptr == NULL\n", i);
@@ -202,20 +225,6 @@ int main(int argc, char *argv[]) {
         }
         ptr[0] = 'y';
         munmap(ptr, PAGE_SIZE);
-
-        // allocate a second anonymous page next to the file to prevent freed_tables from provoking full-tlb shootdown
-        thread_infos[i].extra_page = mmap(thread_infos[i].my_page + 4096, PAGE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS|MAP_FIXED_NOREPLACE, -1, 0);
-        if (thread_infos[i].extra_page == NULL) {
-            printf("mmap() for tid: %d failed, ptr == NULL\n", i);
-            return -1;
-        } else if (thread_infos[i].extra_page == MAP_FAILED) {
-            printf("mmap() for tid: %d failed, ptr == MAP_FAILED\n", i);
-            return -1;
-        } else if (thread_infos[i].extra_page != thread_infos[i].my_page + 4096) {
-            printf("mmap() for tid: %d problem, thread_infos[i].extra_page != thread_infos[i].my_page + 4096\n", i);
-            return -1;
-        }
-
 
         // set cpu affinities: https://man7.org/linux/man-pages/man3/pthread_setaffinity_np.3.html
         CPU_ZERO(&thread_infos[i].cpuset);
@@ -235,15 +244,14 @@ int main(int argc, char *argv[]) {
 
     // main microbenchmarking loops
     for (long t=min_threads-1; t<threads; t++) {
-        mmap_flags = smokewagon ? MAP_SHARED|MAP_FIXED_NOREPLACE : MAP_SHARED|MAP_FIXED_NOREPLACE|MAP_PRIVATE_TLB;
-
         // set when benchmark ends
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        end = (duration + now.tv_sec) * 1000000000L + now.tv_nsec;
+        end = now.tv_sec * 1000000000L + now.tv_nsec + duration * 1000000000L;
         assert(end > now.tv_sec * 1000000000L + now.tv_nsec); // check overflow
 
         printf("Running %s map-read-unmap loop with %ld threads for %ld seconds:\n", smokewagon ? "smokewagon" : "baseline", t+1, duration);
+        printf("now.tv_sec: %ld, now.tv_nsec: %ld, end: %ld\n", now.tv_sec, now.tv_nsec, end);
 
         // create and run threads
         for (long i=1; i<=t; i++) {
@@ -267,15 +275,15 @@ int main(int argc, char *argv[]) {
         printf("%ld threads performed %ld %s loops in %ld seconds.\n\n", t+1, results[t], smokewagon ? "smokewagon" : "baseline", duration);
     }
 
-    printf("microbenchmarking complete, ");
+    printf("microbenchmarking complete\n");
 
+    munmap(big_mmap_ptr, ONE_GB_SIZE*(threads+1));
     // cleanup loop
     for (int i=0; i<threads; i++) {
         close(thread_infos[i].fd);
         char filename[50];
         snprintf(filename, sizeof(filename), "microbenchmark-filebacked-temp-%02d", i);
         remove(filename);
-        munmap(thread_infos[i].extra_page, PAGE_SIZE);
     }
     printf("testing files deleted\n\n");
 
