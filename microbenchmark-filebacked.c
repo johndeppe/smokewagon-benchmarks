@@ -237,7 +237,7 @@ int main(int argc, char *argv[]) {
             pthread_attr_init(&thread_infos[i].attr);
             pthread_attr_setaffinity_np(&thread_infos[i].attr, sizeof(cpu_set_t), &thread_infos[i].cpuset); // reusing pthread_attr without reinitializing below is fine
         }
-        printf("tid %2d affinity set\n", i);
+        // printf("tid %2d affinity set\n", i);
     }
 
     printf("\nbegin benchmarking\n\n");
