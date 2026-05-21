@@ -250,7 +250,7 @@ int main(int argc, char *argv[]) {
         end = now.tv_sec * 1000000000L + now.tv_nsec + duration * 1000000000L;
         assert(end > now.tv_sec * 1000000000L + now.tv_nsec); // check overflow
 
-        printf("Running %s map-read-unmap loop with %ld threads for %ld seconds:\n", smokewagon ? "smokewagon" : "baseline", t+1, duration);
+        printf("Running %s map-read-unmap loop with %ld threads for %ld seconds:\n", smokewagon ? "smokewagon" : "inactive", t+1, duration);
         printf("now.tv_sec: %ld, now.tv_nsec: %ld, end: %ld\n", now.tv_sec, now.tv_nsec, end);
 
         // create and run threads
@@ -272,7 +272,7 @@ int main(int argc, char *argv[]) {
             results[t] += thread_infos[i].counter;
             printf("tid %ld performed %lu loops\n", i, thread_infos[i].counter);
         }
-        printf("%ld threads performed %ld %s loops in %ld seconds.\n\n", t+1, results[t], smokewagon ? "smokewagon" : "baseline", duration);
+        printf("%ld threads performed %ld %s loops in %ld seconds.\n\n", t+1, results[t], smokewagon ? "smokewagon" : "inactive", duration);
     }
 
     printf("microbenchmarking complete\n");
@@ -290,7 +290,7 @@ int main(int argc, char *argv[]) {
     // output statistics
     const char* filename_prefix = "result-microbenchmark-filebacked-";
     const char* filename_smoke = "-smokewagon";
-    const char* filename_base = "-baseline";
+    const char* filename_base = "-inactive";
     const char* filename_suffix = ".csv";
     char* filename = malloc(strlen(filename_prefix) + strlen(u.release) + strlen (smokewagon ? filename_smoke : filename_base) + strlen(filename_suffix) + 1);
     if (!filename) {
