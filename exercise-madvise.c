@@ -33,6 +33,7 @@ void* test_smokewagon(void* tid) {
     if (result != 0) {
         printf("tid %ld: madvise returned: %d, errno: %d, strerror: %s\n", (long) tid, result, errno, strerror(errno));
     }
+    printf("tid %ld: madvise completed.\n", (long) tid);
 
     // touch second half:
     for (long i = PAGES*PAGE_SIZE/2; i < PAGES*PAGE_SIZE; i++ ) {
