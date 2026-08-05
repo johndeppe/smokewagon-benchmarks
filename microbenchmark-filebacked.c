@@ -16,6 +16,7 @@
 #include <sched.h>
 #include <sys/utsname.h> // for uname syscall
 #include <stdint.h> // for uintptr_t
+#include <limits.h> // for PATH_MAX
 
 #define ONE_GB_SIZE (1ULL << 30)
 #define HUGEPAGE_SIZE 2097152
@@ -150,12 +151,29 @@ int main(int argc, char *argv[]) {
         printf("smokewagon OFF\n\n");
     }
 
+    // get kernel's git hash from ~/currentkernel (yes, it's a dumb bad brittle hack)
+    char kernel_hash[128] = "";
+    const char *home = getenv("HOME");
+    if (home) {
+        char hashfile[PATH_MAX];
+        snprintf(hashfile, sizeof(hashfile), "%s/currentkernel", home);
+
+        FILE *hf = fopen(hashfile, "r");
+        if (hf) {
+            if (fgets(kernel_hash, sizeof(kernel_hash), hf)) {
+                kernel_hash[strcspn(kernel_hash, "\n")] = '\0';  // remove newline
+            }
+            fclose(hf);
+        }
+    }
+
     // get and print uname
     struct utsname u;
     if (uname(&u) == -1) {
         perror("uname\n");
         return EXIT_FAILURE;
     }
+
     printf("running on: %s %s %s %s %s\n",
         u.sysname,
         u.nodename,
@@ -289,16 +307,17 @@ int main(int argc, char *argv[]) {
 
     // output statistics
     const char* filename_prefix = "result-microbenchmark-filebacked-";
-    const char* filename_smoke = "-smokewagon";
-    const char* filename_base = "-inactive";
+    const char* filename_smoke = "-smokewagon-";
+    const char* filename_base = "-inactive-";
     const char* filename_suffix = ".csv";
-    char* filename = malloc(strlen(filename_prefix) + strlen(u.release) + strlen (smokewagon ? filename_smoke : filename_base) + strlen(filename_suffix) + 1);
+    char* filename = malloc(strlen(filename_prefix) + strlen(u.release) + strlen (smokewagon ? filename_smoke : filename_base) + strlen(filename_suffix) + strlen(kernel_hash) + 2);
     if (!filename) {
         perror("output filename allocation failed");
     }
     strcpy(filename, filename_prefix);
     strcat(filename, u.release);
     strcat(filename, smokewagon ? filename_smoke : filename_base);
+    strcat(filename, kernel_hash);
     strcat(filename, filename_suffix);
 
     printf("opening %s\n", filename);
