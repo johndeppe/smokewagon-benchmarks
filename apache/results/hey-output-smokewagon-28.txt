@@ -1,0 +1,46 @@
+
+Summary:
+  Total:	10.0092 secs
+  Slowest:	0.3597 secs
+  Fastest:	0.0019 secs
+  Average:	0.0142 secs
+  Requests/sec:	3514.4706
+  
+  Total data:	6718807 bytes
+  Size/request:	191 bytes
+
+Response time histogram:
+  0.002 [1]	|
+  0.038 [34864]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  0.073 [251]	|
+  0.109 [11]	|
+  0.145 [0]	|
+  0.181 [0]	|
+  0.217 [0]	|
+  0.252 [11]	|
+  0.288 [0]	|
+  0.324 [0]	|
+  0.360 [39]	|
+
+
+Latency distribution:
+  10% in 0.0059 secs
+  25% in 0.0084 secs
+  50% in 0.0123 secs
+  75% in 0.0176 secs
+  90% in 0.0235 secs
+  95% in 0.0275 secs
+  99% in 0.0372 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	0.0048 secs, 0.0019 secs, 0.3597 secs
+  DNS-lookup:	0.0024 secs, 0.0000 secs, 0.0427 secs
+  req write:	0.0028 secs, 0.0000 secs, 0.0424 secs
+  resp wait:	0.0038 secs, 0.0005 secs, 0.3486 secs
+  resp read:	0.0027 secs, 0.0001 secs, 0.0283 secs
+
+Status code distribution:
+  [200]	35177 responses
+
+
+
