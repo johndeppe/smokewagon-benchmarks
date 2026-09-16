@@ -44,6 +44,7 @@ long end;
 int mmap_flags = MAP_SHARED|MAP_FIXED_NOREPLACE;
 bool smokewagon = false; // smokewagon == false means don't use smokewagon, smokewagon == true means use smokewagon
 bool filebacked = false;
+bool bystander = false;
 
 void* test_smokewagon(void* info_ptr) {
     struct per_thread_info* my_info = info_ptr;
@@ -95,7 +96,7 @@ int main(int argc, char *argv[]) {
     // check opts
     int opt;
     char* endptr;
-    while ((opt = getopt(argc, argv, "fst:d:m:")) != -1) {
+    while ((opt = getopt(argc, argv, "bfst:d:m:")) != -1) {
         switch(opt) {
             case 't':
                 for (char *p = optarg; *p; p++) {
@@ -140,6 +141,9 @@ int main(int argc, char *argv[]) {
             case 'f':
                 filebacked = true;
                 break;
+            case 'b':
+                bystander = true;
+                break;
         }
     }
     if (min_threads > threads) {
@@ -151,16 +155,22 @@ int main(int argc, char *argv[]) {
 
     if (smokewagon) {
         mmap_flags |= MAP_PRIVATE_TLB;
-        printf("smokewagon:  ON\n");
+        printf("smokewagon: ON\n");
     } else {
         printf("smokewagon: OFF\n");
     }
 
     if (filebacked) {
-        printf("filebacked:  ON\n\n");
+        printf("filebacked: ON\n");
     } else {
         mmap_flags |= MAP_ANONYMOUS;
-        printf("filebacked: OFF\n\n");
+        printf("filebacked: OFF\n");
+    }
+    
+    if (bystander) {
+	printf("bystander:  ON\n\n");
+    } else {
+	printf("bystander:  OFF\n\n");
     }
 
     // get kernel's git hash from ~/currentkernel (yes, it's a dumb bad brittle hack)
@@ -220,10 +230,12 @@ int main(int argc, char *argv[]) {
         // punch a hole in our allocation that we'll map the file into later
         munmap(thread_infos[i].my_page, PAGE_SIZE);
 
-        // each thread gets a bystander page to prevent freed_pages full-mm shootdown
-        thread_infos[i].bystander_page = thread_infos[i].my_page + PAGE_SIZE;
-        mprotect(thread_infos[i].bystander_page, PAGE_SIZE, PROT_READ|PROT_WRITE);
-        thread_infos[i].bystander_page[0] = 'x';
+        if (bystander) {
+            // each thread gets a bystander page to prevent freed_tables full-mm shootdown
+            thread_infos[i].bystander_page = thread_infos[i].my_page + PAGE_SIZE;
+            mprotect(thread_infos[i].bystander_page, PAGE_SIZE, PROT_READ|PROT_WRITE);
+            thread_infos[i].bystander_page[0] = 'x';
+        }
 
         // could unmap the rest of our allocation, but why bother? faster vma traversal maybe?
         if (filebacked)  {
@@ -327,15 +339,18 @@ int main(int argc, char *argv[]) {
     const char* filename_filebacked = "filebacked-";
     const char* filename_membacked = "membacked-";
     const char* filename_smoke = "smokewagon-";
-    const char* filename_base = "inactive-";
+    const char* filename_inactive = "inactive-";
+    const char* filename_yesBystander = "yesBystander-";
+    const char* filename_noBystander = "noBystander-";
     const char* filename_suffix = ".csv";
-    char* filename = malloc(strlen(filename_prefix) + strlen(filebacked ? filename_filebacked : filename_membacked) + strlen(smokewagon ? filename_smoke : filename_base) + strlen(kernel_hash) + 1 + strlen(filename_suffix) + 1);
+    char* filename = malloc(strlen(filename_prefix) + strlen(filebacked ? filename_filebacked : filename_membacked) + strlen(smokewagon ? filename_smoke : filename_inactive) + strlen(kernel_hash) + 1 + strlen(filename_suffix) + 1);
     if (!filename) {
         perror("output filename allocation failed");
     }
     strcpy(filename, filename_prefix);
-    strcat(filename, smokewagon ? filename_smoke : filename_base);
+    strcat(filename, smokewagon ? filename_smoke : filename_inactive);
     strcat(filename, filebacked ? filename_filebacked : filename_membacked);
+    strcat(filename, bystander ? filename_yesBystander : filename_noBystander);
     strcat(filename, kernel_hash);
     strcat(filename, filename_suffix);
 
