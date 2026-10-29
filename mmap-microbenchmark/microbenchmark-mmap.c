@@ -343,7 +343,7 @@ int main(int argc, char *argv[]) {
     const char* filename_yesBystander = "yesBystander-";
     const char* filename_noBystander = "noBystander-";
     const char* filename_suffix = ".csv";
-    char* filename = malloc(strlen(filename_prefix) + strlen(filebacked ? filename_filebacked : filename_membacked) + strlen(smokewagon ? filename_smoke : filename_inactive) + strlen(kernel_hash) + 1 + strlen(filename_suffix) + 1);
+    char* filename = malloc(strlen(filename_prefix) + strlen(filebacked ? filename_filebacked : filename_membacked) + strlen(smokewagon ? filename_smoke : filename_inactive) + strlen(bystander? filename_yesBystander : filename_noBystander) + strlen(kernel_hash) + 1 + strlen(filename_suffix) + 1);
     if (!filename) {
         perror("output filename allocation failed");
     }
