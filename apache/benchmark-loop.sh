@@ -10,6 +10,7 @@ do
     for concurrency in 40 50 60 80 100 150 200
     do
         echo "=== max-cores $max, hey-cores $hey, concurrency $concurrency ==="
-        ./benchmark.sh --min-cores 1 --max-cores $max --hey-cores $hey --concurrency $concurrency || exit 1
+	#./benchmark.sh --min-cores 1 --max-cores $max --hey-cores $hey --concurrency $concurrency || exit 1
+        ./benchmark.sh --min-cores 1 --max-cores $max --hey-cores $hey --concurrency $concurrency --smokewagon off || exit 1
     done
 done
